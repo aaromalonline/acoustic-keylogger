@@ -1,6 +1,7 @@
 # Ignore lab
 lab/*
 !lab/figs
+!lab/train_tflite.py
 
 # Ignore most datasets
 datasets/*

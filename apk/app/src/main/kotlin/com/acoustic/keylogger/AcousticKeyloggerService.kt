@@ -42,6 +42,8 @@ class AcousticKeyloggerService : Service() {
         const val EXTRA_COUNT = "EXTRA_COUNT"
         const val EXTRA_TIMESTAMP = "EXTRA_TIMESTAMP"
         const val EXTRA_CHAR = "EXTRA_CHAR"
+        const val EXTRA_IS_TRAINING = "EXTRA_IS_TRAINING"
+        const val EXTRA_TRAINING_KEY = "EXTRA_TRAINING_KEY"
 
         // States
         const val STATE_CALIBRATING = "CALIBRATING"
@@ -52,6 +54,8 @@ class AcousticKeyloggerService : Service() {
     private var recordingThread: Thread? = null
     private var isRecording = false
     private var keystrokeCount = 0
+    private var isTrainingMode = false
+    private var trainingKey = ""
 
     private lateinit var keystrokeDetector: KeystrokeDetector
     private lateinit var calibrator: Calibrator
@@ -63,6 +67,10 @@ class AcousticKeyloggerService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         Log.d(TAG, "Service started")
+        if (intent != null) {
+            isTrainingMode = intent.getBooleanExtra(EXTRA_IS_TRAINING, false)
+            trainingKey = intent.getStringExtra(EXTRA_TRAINING_KEY) ?: ""
+        }
 
         // Standard notification construction
         val notification = buildNotification("Calibrating ambient noise floor...", "Please keep the area quiet.")
@@ -196,6 +204,13 @@ class AcousticKeyloggerService : Service() {
     private fun onKeystrokeFound(keystroke: ShortArray, peak: Int) {
         keystrokeCount++
         val timestamp = System.currentTimeMillis()
+        
+        val displayChar = if (isTrainingMode) {
+            saveTrainingKeystroke(keystroke, trainingKey, timestamp)
+            trainingKey
+        } else {
+            getMockChar(peak)
+        }
 
         // Broadcast to UI
         val intent = Intent(ACTION_KEYSTROKE_DETECTED).apply {
@@ -203,7 +218,8 @@ class AcousticKeyloggerService : Service() {
             putExtra(EXTRA_PEAK, peak)
             putExtra(EXTRA_COUNT, keystrokeCount)
             putExtra(EXTRA_TIMESTAMP, timestamp)
-            putExtra(EXTRA_CHAR, getMockChar(peak))
+            putExtra(EXTRA_CHAR, displayChar)
+            putExtra(EXTRA_IS_TRAINING, isTrainingMode)
         }
         sendBroadcast(intent)
     }
@@ -215,6 +231,27 @@ class AcousticKeyloggerService : Service() {
         val index = (peak % chars.length).coerceIn(0, chars.length - 1)
         val char = chars[index]
         return if (char == ' ') "[SPACE]" else char.toString()
+    }
+
+    private fun saveTrainingKeystroke(keystroke: ShortArray, key: String, timestamp: Long): String? {
+        return try {
+            val dir = File(getExternalFilesDir(null) ?: filesDir, "training")
+            if (!dir.exists()) dir.mkdirs()
+            val file = File(dir, "train_${key}_${timestamp}.pcm")
+            val fos = FileOutputStream(file)
+            val byteBuffer = ByteBuffer.allocate(keystroke.size * 2).apply {
+                order(ByteOrder.LITTLE_ENDIAN)
+                for (sample in keystroke) {
+                    putShort(sample)
+                }
+            }
+            fos.write(byteBuffer.array())
+            fos.close()
+            file.absolutePath
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to save training PCM: ${e.message}")
+            null
+        }
     }
 
     private fun broadcastStatus(status: String, threshold: Int) {

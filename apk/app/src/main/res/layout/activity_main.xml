@@ -127,17 +127,82 @@
             android:backgroundTint="#FF1744"/>
     </LinearLayout>
 
+    <!-- Training Card -->
+    <com.google.android.material.card.MaterialCardView
+        android:id="@+id/trainingCard"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        app:cardBackgroundColor="#1E1E1E"
+        app:cardCornerRadius="16dp"
+        app:strokeWidth="1dp"
+        app:strokeColor="#333333"
+        app:layout_constraintTop_toBottomOf="@id/buttonsLayout">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="16dp">
+
+            <com.google.android.material.checkbox.MaterialCheckBox
+                android:id="@+id/cbTrainingMode"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Enable Training Data Collection"
+                android:textColor="#FFFFFF"
+                app:buttonTint="#2979FF"/>
+
+            <LinearLayout
+                android:id="@+id/trainingControls"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:visibility="gone"
+                android:layout_marginTop="8dp">
+
+                <TextView
+                    android:id="@+id/tvTrainingPrompt"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Target: Press 'a' 10 times"
+                    android:textColor="#FFFFFF"
+                    android:textSize="16sp"
+                    android:textStyle="bold"/>
+
+                <TextView
+                    android:id="@+id/tvTrainingProgress"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:text="Progress for current key: 0 / 10"
+                    android:textColor="#B0BEC5"
+                    android:textSize="14sp"/>
+
+                <com.google.android.material.progressindicator.LinearProgressIndicator
+                    android:id="@+id/trainingProgressBar"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    app:trackColor="#333333"
+                    app:indicatorColor="#2979FF"
+                    android:max="10"
+                    android:progress="0"/>
+            </LinearLayout>
+        </LinearLayout>
+    </com.google.android.material.card.MaterialCardView>
+
     <!-- Log Card -->
     <com.google.android.material.card.MaterialCardView
         android:id="@+id/logCard"
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_marginTop="20dp"
+        android:layout_marginTop="16dp"
         app:cardBackgroundColor="#1E1E1E"
         app:cardCornerRadius="16dp"
         app:strokeWidth="1dp"
         app:strokeColor="#333333"
-        app:layout_constraintTop_toBottomOf="@id/buttonsLayout"
+        app:layout_constraintTop_toBottomOf="@id/trainingCard"
         app:layout_constraintBottom_toBottomOf="parent">
 
         <LinearLayout

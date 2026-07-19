@@ -35,6 +35,21 @@ class MainActivity : AppCompatActivity() {
     private val logLines = ArrayList<String>()
     private val typedTextAccumulator = StringBuilder()
 
+    // Training Mode views & state
+    private lateinit var cbTrainingMode: com.google.android.material.checkbox.MaterialCheckBox
+    private lateinit var trainingControls: android.widget.LinearLayout
+    private lateinit var tvTrainingPrompt: TextView
+    private lateinit var tvTrainingProgress: TextView
+    private lateinit var trainingProgressBar: com.google.android.material.progressindicator.LinearProgressIndicator
+
+    private var isTrainingActive = false
+    private var currentTrainingKeyIndex = 0
+    private var currentTrainingKeySamplesCount = 0
+    private val trainingKeys = listOf(
+        "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", 
+        "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z", "space"
+    )
+
     // Permission launcher for Android Runtime Permissions
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -66,8 +81,13 @@ class MainActivity : AppCompatActivity() {
                     val count = intent.getIntExtra(AcousticKeyloggerService.EXTRA_COUNT, 0)
                     val timestamp = intent.getLongExtra(AcousticKeyloggerService.EXTRA_TIMESTAMP, 0)
                     val char = intent.getStringExtra(AcousticKeyloggerService.EXTRA_CHAR) ?: ""
+                    val isTraining = intent.getBooleanExtra(AcousticKeyloggerService.EXTRA_IS_TRAINING, false)
                     
                     logKeystroke(count, peak, timestamp, char)
+
+                    if (isTraining) {
+                        handleTrainingKeystroke(char)
+                    }
                 }
             }
         }
@@ -85,6 +105,21 @@ class MainActivity : AppCompatActivity() {
         statusIndicator = findViewById(R.id.statusIndicator)
         btnStart = findViewById(R.id.btnStart)
         btnStop = findViewById(R.id.btnStop)
+
+        // Initialize Training UI Elements
+        cbTrainingMode = findViewById(R.id.cbTrainingMode)
+        trainingControls = findViewById(R.id.trainingControls)
+        tvTrainingPrompt = findViewById(R.id.tvTrainingPrompt)
+        tvTrainingProgress = findViewById(R.id.tvTrainingProgress)
+        trainingProgressBar = findViewById(R.id.trainingProgressBar)
+
+        cbTrainingMode.setOnCheckedChangeListener { _, isChecked ->
+            isTrainingActive = isChecked
+            trainingControls.visibility = if (isChecked) android.view.View.VISIBLE else android.view.View.GONE
+            if (isChecked) {
+                resetTrainingSession()
+            }
+        }
 
         // Configure Buttons
         btnStart.setOnClickListener {
@@ -141,11 +176,67 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startKeyloggerService() {
-        val serviceIntent = Intent(this, AcousticKeyloggerService::class.java)
+        val serviceIntent = Intent(this, AcousticKeyloggerService::class.java).apply {
+            putExtra(AcousticKeyloggerService.EXTRA_IS_TRAINING, isTrainingActive)
+            if (isTrainingActive && currentTrainingKeyIndex < trainingKeys.size) {
+                putExtra(AcousticKeyloggerService.EXTRA_TRAINING_KEY, trainingKeys[currentTrainingKeyIndex])
+            }
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(serviceIntent)
         } else {
             startService(serviceIntent)
+        }
+    }
+
+    private fun resetTrainingSession() {
+        currentTrainingKeyIndex = 0
+        currentTrainingKeySamplesCount = 0
+        updateTrainingUI()
+    }
+
+    private fun updateTrainingUI() {
+        if (currentTrainingKeyIndex < trainingKeys.size) {
+            val targetKey = trainingKeys[currentTrainingKeyIndex]
+            tvTrainingPrompt.text = "Target: Press '$targetKey' 10 times"
+            tvTrainingProgress.text = "Progress for '$targetKey': $currentTrainingKeySamplesCount / 10"
+            trainingProgressBar.progress = currentTrainingKeySamplesCount
+        } else {
+            tvTrainingPrompt.text = "Training Complete! 🎉"
+            tvTrainingProgress.text = "All 270 samples collected and stored."
+            trainingProgressBar.progress = 10
+            cbTrainingMode.isChecked = false
+            isTrainingActive = false
+            stopKeyloggerService()
+            Toast.makeText(this, "Acoustic dataset collection complete!", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun handleTrainingKeystroke(char: String) {
+        if (currentTrainingKeyIndex >= trainingKeys.size) return
+        val target = trainingKeys[currentTrainingKeyIndex]
+        if (char == target) {
+            currentTrainingKeySamplesCount++
+            if (currentTrainingKeySamplesCount >= 10) {
+                currentTrainingKeySamplesCount = 0
+                currentTrainingKeyIndex++
+                updateTrainingServiceKey()
+            }
+            updateTrainingUI()
+        }
+    }
+
+    private fun updateTrainingServiceKey() {
+        if (currentTrainingKeyIndex < trainingKeys.size) {
+            val serviceIntent = Intent(this, AcousticKeyloggerService::class.java).apply {
+                putExtra(AcousticKeyloggerService.EXTRA_IS_TRAINING, true)
+                putExtra(AcousticKeyloggerService.EXTRA_TRAINING_KEY, trainingKeys[currentTrainingKeyIndex])
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(serviceIntent)
+            } else {
+                startService(serviceIntent)
+            }
         }
     }
 
