@@ -1,7 +1,6 @@
 import os
 import glob
 import numpy as np
-import librosa
 import tensorflow as tf
 from sklearn.model_selection import train_test_split
 
@@ -9,7 +8,6 @@ from sklearn.model_selection import train_test_split
 SAMPLE_RATE = 44100
 WINDOW_DURATION = 0.3
 NUM_SAMPLES = int(SAMPLE_RATE * WINDOW_DURATION)  # 13230 samples
-NUM_MFCC = 13
 
 # List of target labels
 LABELS = [
@@ -32,14 +30,9 @@ def load_pcm_file(filepath):
     # Convert to float32 normalized
     return audio_data.astype(np.float32) / 32768.0
 
-def extract_features(audio_data):
-    """Extract Mel-Frequency Cepstral Coefficients (MFCC) and flatten them."""
-    mfccs = librosa.feature.mfcc(y=audio_data, sr=SAMPLE_RATE, n_mfcc=NUM_MFCC, hop_length=512)
-    return mfccs.flatten()
-
 def main(data_dir="datasets/training", output_model="lab/keylogger_model.tflite"):
     print("--------------------------------------------------")
-    print("  Acoustic Keylogger - TFLite Classifier Trainer  ")
+    print("  Acoustic Keylogger - End-to-End 1D CNN Trainer  ")
     print("--------------------------------------------------")
     
     if not os.path.exists(data_dir):
@@ -61,7 +54,7 @@ def main(data_dir="datasets/training", output_model="lab/keylogger_model.tflite"
     X = []
     y = []
     
-    print("[*] Processing audio files and extracting MFCC features...")
+    print("[*] Processing raw audio signals...")
     for filepath in files:
         filename = os.path.basename(filepath)
         # Parse label from file pattern: train_<key>_<timestamp>.pcm
@@ -76,9 +69,8 @@ def main(data_dir="datasets/training", output_model="lab/keylogger_model.tflite"
             
         try:
             audio = load_pcm_file(filepath)
-            features = extract_features(audio)
-            
-            X.append(features)
+            # Expand dimensions to (13230, 1) for Conv1D layer input channel
+            X.append(np.expand_dims(audio, axis=-1))
             y.append(LABEL_MAP[key_label])
         except Exception as e:
             print(f"[!] Failed to process '{filename}': {str(e)}")
@@ -95,14 +87,17 @@ def main(data_dir="datasets/training", output_model="lab/keylogger_model.tflite"
     # Split into train and test sets
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.15, random_state=42, stratify=y)
     
-    # Build Keras classifier model
-    input_shape = (X.shape[1],)
+    # Build 1D Convolutional Neural Network (CNN) for raw waveform processing
     model = tf.keras.Sequential([
-        tf.keras.layers.Input(shape=input_shape),
-        tf.keras.layers.Dense(128, activation='relu'),
-        tf.keras.layers.Dropout(0.3),
+        tf.keras.layers.Input(shape=(NUM_SAMPLES, 1)),
+        # Conv1D layer to act as learnable filterbank on raw waveform
+        tf.keras.layers.Conv1D(16, kernel_size=64, strides=4, activation='relu'),
+        tf.keras.layers.MaxPooling1D(pool_size=4),
+        tf.keras.layers.Conv1D(32, kernel_size=32, strides=2, activation='relu'),
+        tf.keras.layers.MaxPooling1D(pool_size=4),
+        tf.keras.layers.Flatten(),
         tf.keras.layers.Dense(64, activation='relu'),
-        tf.keras.layers.Dropout(0.2),
+        tf.keras.layers.Dropout(0.3),
         tf.keras.layers.Dense(len(LABELS), activation='softmax')
     ])
     
@@ -112,11 +107,11 @@ def main(data_dir="datasets/training", output_model="lab/keylogger_model.tflite"
         metrics=['accuracy']
     )
     
-    print("\n[*] Training Neural Network Classifier...")
+    print("\n[*] Training 1D Convolutional Neural Network...")
     model.fit(
         X_train, y_train,
         validation_data=(X_test, y_test),
-        epochs=60,
+        epochs=50,
         batch_size=16
     )
     
@@ -141,7 +136,7 @@ def main(data_dir="datasets/training", output_model="lab/keylogger_model.tflite"
     print("Next steps to run on Android:")
     print("1. Copy 'keylogger_model.tflite' to your Android app assets directory:")
     print("   apk/app/src/main/assets/keylogger_model.tflite")
-    print("2. Update the Android app to run TFLite interpreter (I can write this code next).")
+    print("2. Update the Android app to run TFLite interpreter.")
     print("--------------------------------------------------")
 
 if __name__ == "__main__":

