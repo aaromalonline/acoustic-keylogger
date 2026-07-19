@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">Acoustic Keylogger</string>
+    <string name="service_notification_title">Keylogger Service Running</string>
+    <string name="service_notification_desc">Listening for acoustic keystrokes in the background...</string>
+</resources>
