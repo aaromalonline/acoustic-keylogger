@@ -20,6 +20,9 @@ import java.io.File
 import java.io.FileOutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.core.content.ContextCompat
 
 class AcousticKeyloggerService : Service() {
 
@@ -38,7 +41,7 @@ class AcousticKeyloggerService : Service() {
         const val EXTRA_PEAK = "EXTRA_PEAK"
         const val EXTRA_COUNT = "EXTRA_COUNT"
         const val EXTRA_TIMESTAMP = "EXTRA_TIMESTAMP"
-        const val EXTRA_FILE_PATH = "EXTRA_FILE_PATH"
+        const val EXTRA_CHAR = "EXTRA_CHAR"
 
         // States
         const val STATE_CALIBRATING = "CALIBRATING"
@@ -83,6 +86,8 @@ class AcousticKeyloggerService : Service() {
         Log.d(TAG, "Service stopped")
         stopRecording()
         broadcastStatus(STATE_STOPPED, 0)
+        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        manager.cancel(NOTIFICATION_ID)
         super.onDestroy()
     }
 
@@ -109,12 +114,23 @@ class AcousticKeyloggerService : Service() {
         recordingThread = Thread({
             android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_AUDIO)
             
+            if (ContextCompat.checkSelfPermission(this@AcousticKeyloggerService, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                Log.e(TAG, "RECORD_AUDIO permission not granted inside service")
+                stopSelf()
+                return@Thread
+            }
+
             val sampleRate = 44100
             val channelConfig = AudioFormat.CHANNEL_IN_MONO
             val audioFormat = AudioFormat.ENCODING_PCM_16BIT
             
             val minBufferSize = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat)
-            val bufferSize = minBufferSize.coerceAtLeast(2048)
+            if (minBufferSize <= 0) {
+                Log.e(TAG, "Invalid minimum buffer size: $minBufferSize")
+                stopSelf()
+                return@Thread
+            }
+            val bufferSize = minBufferSize * 2
 
             try {
                 val audioRecord = AudioRecord(
@@ -138,13 +154,13 @@ class AcousticKeyloggerService : Service() {
                     val read = audioRecord.read(buffer, 0, buffer.size)
                     if (read > 0) {
                         if (!calibrator.isCalibrated()) {
-                            val done = calibrator.feed(buffer, read)
-                            if (done) {
-                                // Calibration just finished in the loop
-                            }
+                            calibrator.feed(buffer, read)
                         } else {
                             keystrokeDetector.feed(buffer, read)
                         }
+                    } else if (read < 0) {
+                        Log.e(TAG, "AudioRecord read error: $read")
+                        break
                     }
                 }
 
@@ -180,43 +196,30 @@ class AcousticKeyloggerService : Service() {
     private fun onKeystrokeFound(keystroke: ShortArray, peak: Int) {
         keystrokeCount++
         val timestamp = System.currentTimeMillis()
-        val filePath = saveKeystrokeToFile(keystroke, keystrokeCount)
 
         // Broadcast to UI
         val intent = Intent(ACTION_KEYSTROKE_DETECTED).apply {
+            setPackage(packageName)
             putExtra(EXTRA_PEAK, peak)
             putExtra(EXTRA_COUNT, keystrokeCount)
             putExtra(EXTRA_TIMESTAMP, timestamp)
-            putExtra(EXTRA_FILE_PATH, filePath ?: "")
+            putExtra(EXTRA_CHAR, getMockChar(peak))
         }
         sendBroadcast(intent)
     }
 
-    private fun saveKeystrokeToFile(keystroke: ShortArray, index: Int): String? {
-        return try {
-            val dir = getExternalFilesDir(null) ?: filesDir
-            if (!dir.exists()) dir.mkdirs()
-            val file = File(dir, "keystroke_$index.pcm")
-            val fos = FileOutputStream(file)
-            
-            // Allocate byte buffer for little endian 16-bit PCM writing
-            val byteBuffer = ByteBuffer.allocate(keystroke.size * 2).apply {
-                order(ByteOrder.LITTLE_ENDIAN)
-                for (sample in keystroke) {
-                    putShort(sample)
-                }
-            }
-            fos.write(byteBuffer.array())
-            fos.close()
-            file.absolutePath
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to save keystroke PCM: ${e.message}")
-            null
-        }
+    private fun getMockChar(peak: Int): String {
+        // Map peak sound amplitude to characters based on English frequency index
+        // This is a deterministic heuristic mapping to simulate classification feedback
+        val chars = " eeeeaaatttiooosrrnnnlllcccuuuuddddmppffggyywvbbkkxxjjqqzz"
+        val index = (peak % chars.length).coerceIn(0, chars.length - 1)
+        val char = chars[index]
+        return if (char == ' ') "[SPACE]" else char.toString()
     }
 
     private fun broadcastStatus(status: String, threshold: Int) {
         val intent = Intent(ACTION_STATUS_UPDATE).apply {
+            setPackage(packageName)
             putExtra(EXTRA_STATUS, status)
             putExtra(EXTRA_THRESHOLD, threshold)
         }

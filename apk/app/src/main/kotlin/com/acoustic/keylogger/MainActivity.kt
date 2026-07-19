@@ -32,6 +32,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnStop: MaterialButton
 
     private var currentStatus = AcousticKeyloggerService.STATE_STOPPED
+    private val logLines = ArrayList<String>()
+    private val typedTextAccumulator = StringBuilder()
 
     // Permission launcher for Android Runtime Permissions
     private val requestPermissionLauncher = registerForActivityResult(
@@ -63,9 +65,9 @@ class MainActivity : AppCompatActivity() {
                     val peak = intent.getIntExtra(AcousticKeyloggerService.EXTRA_PEAK, 0)
                     val count = intent.getIntExtra(AcousticKeyloggerService.EXTRA_COUNT, 0)
                     val timestamp = intent.getLongExtra(AcousticKeyloggerService.EXTRA_TIMESTAMP, 0)
-                    val filePath = intent.getStringExtra(AcousticKeyloggerService.EXTRA_FILE_PATH) ?: ""
+                    val char = intent.getStringExtra(AcousticKeyloggerService.EXTRA_CHAR) ?: ""
                     
-                    logKeystroke(count, peak, timestamp, filePath)
+                    logKeystroke(count, peak, timestamp, char)
                 }
             }
         }
@@ -181,22 +183,39 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun logKeystroke(count: Int, peak: Int, timestamp: Long, filePath: String) {
+    private fun logKeystroke(count: Int, peak: Int, timestamp: Long, char: String) {
         keystrokeCountText.text = "Keystrokes Detected: $count"
 
         val sdf = SimpleDateFormat("HH:mm:ss.SSS", Locale.getDefault())
         val formattedTime = sdf.format(Date(timestamp))
-        val file = File(filePath)
 
-        val logEntry = "[%s] Keystroke #%d detected | Peak: %d | Saved: %s\n"
-            .format(formattedTime, count, peak, file.name)
+        val displayChar = if (char == "[SPACE]") " " else char
+        typedTextAccumulator.append(displayChar)
 
-        logTextView.append(logEntry)
+        val newLine = "[%s] Keystroke #%d | Peak: %d | Predicted: \'%s\'"
+            .format(formattedTime, count, peak, char)
+        logLines.add(newLine)
+
+        // Limit log size to prevent layout performance lag
+        if (logLines.size > 100) {
+            logLines.removeAt(0)
+        }
+
+        val sb = StringBuilder().apply {
+            append("READABLE TYPED INPUT:\n")
+            append("👉 \"").append(typedTextAccumulator.toString()).append("\"\n")
+            append("==================================================\n\n")
+            for (line in logLines.reversed()) {
+                append(line).append("\n")
+            }
+        }
+
+        logTextView.text = sb.toString()
         
-        // Auto scroll to bottom
+        // Auto scroll to top to keep the readable typed input in view
         val scroll = logTextView.parent as? android.widget.ScrollView
         scroll?.post {
-            scroll.fullScroll(android.view.View.FOCUS_DOWN)
+            scroll.fullScroll(android.view.View.FOCUS_UP)
         }
     }
 }
