@@ -157,10 +157,11 @@ class AcousticKeyloggerService : Service() {
 
                 audioRecord.startRecording()
                 val buffer = ShortArray(1024)
-
+                var zeroReadCount = 0
                 while (isRecording) {
                     val read = audioRecord.read(buffer, 0, buffer.size)
                     if (read > 0) {
+                        zeroReadCount = 0
                         if (!calibrator.isCalibrated()) {
                             calibrator.feed(buffer, read)
                         } else {
@@ -169,6 +170,17 @@ class AcousticKeyloggerService : Service() {
                     } else if (read < 0) {
                         Log.e(TAG, "AudioRecord read error: $read")
                         break
+                    } else {
+                        zeroReadCount++
+                        if (zeroReadCount > 100) {
+                            Log.e(TAG, "AudioRecord returned 0 samples repeatedly. Microphone may be busy or blocked.")
+                            break
+                        }
+                        try {
+                            Thread.sleep(10)
+                        } catch (e: InterruptedException) {
+                            break
+                        }
                     }
                 }
 
